@@ -4,9 +4,6 @@ import pprint
 import json
 from pymongo import MongoClient
 
-TOKEN = " "
-# пока прописываю токен здесь для отладки
-
 
 class User:
 
@@ -14,7 +11,7 @@ class User:
         self.user_id = user_id
 
     def generate_token(self):
-        APP_ID = " "
+        APP_ID = ""
         authorization = "https://oauth.vk.com/authorize?client_id=" + APP_ID + \
                         "&display=page&redirect_uri=https://oauth.vk.com/blank.html&scope=friends&" \
                         "response_type=token&v=5.52"
@@ -54,7 +51,9 @@ class User:
         return response
 
     def search_users_by_sex_city_age_status(self):
+        searched_users_collection = self.connect_to_Mongo()
         target_person = self.get_user_info()
+        check_user_existance_lst = list()
         if target_person["sex"] == 1:
             users_sex = 2
         elif target_person["sex"] == 2:
@@ -70,7 +69,8 @@ class User:
                     "v": "5.103",
                     "sex": users_sex,
                     "count": 1000,
-                    "fields": "has_photo, relation",
+                    "fields": "relation",
+                    "has_photo": 1,
                     "city": users_city,
                     "age_from": start_age,
                     "age_to": start_age + 5
@@ -78,84 +78,98 @@ class User:
         )
         info = response.json()["response"]
         searched_users = info["items"]
-        relation_lst = [0, 1, 5, 6]
-        searched_users_lst = list()
         for user in searched_users:
+            user_id = user["id"]
+            user["link"] = f"https://vk.com/id{user_id}"
+        relation_lst = [0, 1, 5, 6]
+        check_user_existance = list(searched_users_collection.find({}, {"id": 1}))
+        for element in check_user_existance:
+            check_user_existance_lst.append(element["id"])
+        for index in range(len(searched_users)-1, -1, -1):
+            if searched_users[index]["id"] in check_user_existance_lst:
+                searched_users.remove(searched_users[index])
             try:
-                if user["has_photo"] == 1 and user["relation"] in relation_lst:
-                    searched_users_lst.append(user)
+                if searched_users[index]["relation"] not in relation_lst:
+                    searched_users.remove(searched_users[index])
             except KeyError:
                 continue
-        return searched_users_lst[:10]
+        return searched_users[:10]
 
     def get_3_popular_photos(self):
         searched_users = self.search_users_by_sex_city_age_status()
         searched_photos_lst = list()
         searched_photos_dict = dict()
         likes_link_lst = list()
+        url_lst = list()
         for user in searched_users:
             user_id = user["id"]
-            response = requests.get(
-                "https://api.vk.com/method/photos.get",
-                params={"access_token": TOKEN,
-                        "v": "5.103",
-                        "owner_id": user_id,
-                        "album_id": "profile",
-                        "photo_sizes": 1,
-                        "extended": 1
-                        }
-            )
-            user_info = response.json()["response"]["items"]
-            searched_photos_lst.append(user_info)
-            for user in searched_photos_lst:
-                for item in user:
-                    owner_id = item["owner_id"]
-                    likes_count = item["likes"]["count"]
-                    sizes = item["sizes"]
-                    for element in sizes:
-                        if element["type"] == "x":
-                            url = element["url"]
-                            likes_link_dict = {"likes": likes_count, "url": url}
-                            likes_link_lst.append(likes_link_dict)
-                searched_photos_dict[owner_id] = likes_link_lst
-                likes_link_lst = []
-                user_likes_lst = list()
-                user_likes_dict = dict()
-                for user in searched_photos_dict:
-                    for id_value in searched_photos_dict[user]:
-                        user_likes = id_value["likes"]
-                        user_likes_lst.append(user_likes)
-                    user_likes_dict[user] = user_likes_lst
-                    user_likes_lst = list()
-                    user_url_lst = list()
-                    final_dict = dict()
-                for user_id in user_likes_dict:
-                    if len(user_likes_dict) > 3:
-                        sorted_likes_lst = sorted(user_likes_dict[user_id], reverse=True)
-                        user_likes_dict[user_id] = sorted_likes_lst[:3]
-                        for user in searched_photos_dict:
-                            for id_value in searched_photos_dict[user]:
-                                if user == user_id and id_value["likes"] in user_likes_dict[user_id]:
-                                    user_url_lst.append(id_value["url"])
-                                    final_dict[str(user)] = user_url_lst
-                            user_url_lst = list()
-        return final_dict
+            try:
+                response = requests.get(
+                    "https://api.vk.com/method/photos.get",
+                    params={"access_token": TOKEN,
+                            "v": "5.103",
+                            "owner_id": user_id,
+                            "album_id": "profile",
+                            "photo_sizes": 1,
+                            "extended": 1
+                            }
+                )
+                user_info = response.json()["response"]["items"]
+                searched_photos_lst.append(user_info)
+                for user_1 in searched_photos_lst:
+                    for item in user_1:
+                        owner_id = item["owner_id"]
+                        likes_count = item["likes"]["count"]
+                        sizes = item["sizes"]
+                        for element in sizes:
+                            if element["type"] == "x":
+                                likes_link_lst.append({"likes": likes_count, "url": element["url"]})
+                        searched_photos_dict[owner_id] = likes_link_lst
+                    likes_link_lst = []
+            except KeyError:
+                continue
+            for user_3 in searched_photos_dict:
+                for_sort = searched_photos_dict[user_3]
+                for_sort.sort(key=lambda for_sort: for_sort['likes'], reverse=True)
+                searched_photos_dict[user_3] = for_sort[:3]
+                for el in for_sort[:3]:
+                    url_lst.append(el["url"])
+                searched_photos_dict[user_3] = url_lst
+                user["photos"] = url_lst
+                url_lst = list()
+        for item in searched_users:
+            try:
+                item.pop("is_closed")
+                item.pop("track_code")
+                item.pop("can_access_closed")
+                item.pop("has_photo")
+                item.pop("relation")
+            except KeyError:
+                continue
+        return searched_users
 
     def create_json_file(self):
         with open("searched_users.json", "w", encoding='utf-8') as f:
             data = self.get_3_popular_photos()
-            f.write(json.dumps(data, ensure_ascii=False))
+            f.write(json.dumps(data, indent=1, ensure_ascii=False))
+        return data
 
-    def write_result_in_database(self):
-        client = MongoClient()
+    def connect_to_Mongo(self):
+        client = MongoClient("localhost", 27017)
         searched_users_db = client["searched_users"]
         searched_users_collection = searched_users_db['searched_user']
-        searched_users = self.get_3_popular_photos()
-        searched_users_collection.insert_one(searched_users)
+        return searched_users_collection
+
+    def write_result_in_database(self):
+        searched_users_collection = self.connect_to_Mongo()
+        searched_users = self.create_json_file()
+        for user in searched_users:
+            searched_users_collection.insert_one(user)
         return searched_users_collection
 
 
 if __name__ == '__main__':
-    user_1 = User(" ")
-    pprint.pprint(user_1.create_json_file())
+    user_1 = User("")
+    TOKEN = user_1.generate_token()
+    pprint.pprint(user_1.write_result_in_database())
 
