@@ -9,6 +9,7 @@ class User:
 
     def __init__(self, user_id):
         self.user_id = user_id
+        self.access_token = ""
 
     def generate_token(self):
         APP_ID = ""
@@ -22,7 +23,7 @@ class User:
     def convert_screenname_to_id(self, user_id):
         response = requests.get(
             "https://api.vk.com/method/utils.resolveScreenName",
-            params={"access_token": TOKEN,
+            params={"access_token": self.access_token,
                  "v": "5.103",
                  "screen_name": user_id
                     }
@@ -32,7 +33,7 @@ class User:
         return USER_ID
 
     def get_user_info(self):
-        params = {"access_token": TOKEN, "user_ids": self.convert_screenname_to_id(self.user_id),
+        params = {"access_token": self.access_token, "user_ids": self.convert_screenname_to_id(self.user_id),
                   "fields": "bdate, city, sex, relation", "v": "5.103"}
         response = requests.get("https://api.vk.com/method/users.get", params=params).json()['response'][0]
         if "bdate" not in response:
@@ -44,7 +45,7 @@ class User:
             response["bdate"] = full_bdate
         if "city" not in response:
             city = input("Введите ваш город: ")
-            params = {"access_token": TOKEN, "country_id": 1, "q": city, "v": "5.103"}
+            params = {"access_token": self.access_token, "country_id": 1, "q": city, "v": "5.103"}
             city_response = requests.get("https://api.vk.com/method/database.getCities", params=params).json()["response"]
             city_info = city_response["items"][0]
             response["city"] = city_info
@@ -65,7 +66,7 @@ class User:
         start_age = date_now.year - target_person_bdate.year
         response = requests.get(
             "https://api.vk.com/method/users.search",
-            params={"access_token": TOKEN,
+            params={"access_token": self.access_token,
                     "v": "5.103",
                     "sex": users_sex,
                     "count": 1000,
@@ -101,12 +102,12 @@ class User:
         searched_photos_dict = dict()
         likes_link_lst = list()
         url_lst = list()
-        for user in searched_users:
-            user_id = user["id"]
+        for searched_user in searched_users:
+            user_id = searched_user["id"]
             try:
                 response = requests.get(
                     "https://api.vk.com/method/photos.get",
-                    params={"access_token": TOKEN,
+                    params={"access_token": self.access_token,
                             "v": "5.103",
                             "owner_id": user_id,
                             "album_id": "profile",
@@ -116,8 +117,8 @@ class User:
                 )
                 user_info = response.json()["response"]["items"]
                 searched_photos_lst.append(user_info)
-                for user_1 in searched_photos_lst:
-                    for item in user_1:
+                for user in searched_photos_lst:
+                    for item in user:
                         owner_id = item["owner_id"]
                         likes_count = item["likes"]["count"]
                         sizes = item["sizes"]
@@ -128,21 +129,20 @@ class User:
                     likes_link_lst = []
             except KeyError:
                 continue
-            for user_3 in searched_photos_dict:
-                for_sort = searched_photos_dict[user_3]
+            for person in searched_photos_dict:
+                for_sort = searched_photos_dict[person]
                 for_sort.sort(key=lambda for_sort: for_sort['likes'], reverse=True)
-                searched_photos_dict[user_3] = for_sort[:3]
+                searched_photos_dict[person] = for_sort[:3]
                 for el in for_sort[:3]:
                     url_lst.append(el["url"])
-                searched_photos_dict[user_3] = url_lst
-                user["photos"] = url_lst
+                searched_photos_dict[person] = url_lst
+                searched_user["photos"] = url_lst
                 url_lst = list()
         for item in searched_users:
+            item.pop("is_closed")
+            item.pop("track_code")
+            item.pop("can_access_closed")
             try:
-                item.pop("is_closed")
-                item.pop("track_code")
-                item.pop("can_access_closed")
-                item.pop("has_photo")
                 item.pop("relation")
             except KeyError:
                 continue
@@ -170,6 +170,6 @@ class User:
 
 if __name__ == '__main__':
     user_1 = User("")
-    TOKEN = user_1.generate_token()
+    # TOKEN = user_1.generate_token()
     pprint.pprint(user_1.write_result_in_database())
 
